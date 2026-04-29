@@ -1,0 +1,27 @@
+#!/bin/sh
+set -e
+
+branch=$(git branch --show-current)
+[ "$branch" = "stable" ] || exit 0
+
+has_dev() {
+    git ls-remote --exit-code "https://github.com/mazunki/$1" "refs/heads/dev" >/dev/null 2>&1
+}
+
+tmp="$(mktemp -d)"
+trap 'git worktree remove --force "$tmp"' EXIT
+
+git worktree add "$tmp" dev
+cp flake.nix "$tmp/flake.nix"
+
+repos=$(nix eval --raw '.#lib.repos' --apply 'builtins.concatStringsSep "\n"')
+
+for repo in $repos; do
+    if has_dev "$repo"; then
+        sed -i "s|github:mazunki/$repo\";|github:mazunki/$repo/dev\";|g" "$tmp/flake.nix"
+    fi
+done
+
+nix flake update --flake "$tmp"
+git -C "$tmp" add flake.nix flake.lock
+git -C "$tmp" commit -m "sync dev from stable"
